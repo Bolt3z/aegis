@@ -3,8 +3,12 @@ use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 
+use flate2::Compression;
+use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+
 use crate::error::{Error, Result};
-use crate::header::{FLAG_DIRECTORY, HEADER_LEN, Header};
+use crate::header::{FLAG_COMPRESSED, FLAG_DIRECTORY, HEADER_LEN, Header};
 use crate::kdf::{KdfParams, derive_key};
 use crate::stream::{StreamDecoder, StreamEncoder};
 
@@ -143,23 +147,32 @@ pub fn encrypt_dir(
             input.display()
         ))));
     }
+    let compress = extra_flags & FLAG_COMPRESSED != 0;
     encrypt_payload(
         output,
         FLAG_DIRECTORY | extra_flags,
         password,
         params,
         |encoder| {
-        let mut builder = tar::Builder::new(encoder);
-        builder.follow_symlinks(false);
-        builder.append_dir_all(".", input)?;
-        builder.finish()?;
-        // `into_inner` returns ownership of the writer back; we don't need it
-        // here because the outer `encrypt_payload` keeps the encoder alive via
-        // the closure parameter — but tar holds it by `&mut` so it's already
-        // released when `builder` is dropped at the end of this scope.
-        drop(builder);
-        Ok(())
-    })
+            if compress {
+                // Pipeline: tar -> gzip -> AEAD encoder. Finish the gzip layer
+                // before returning so all compressed bytes reach the encoder.
+                let gz = GzEncoder::new(encoder, Compression::default());
+                let mut builder = tar::Builder::new(gz);
+                builder.follow_symlinks(false);
+                builder.append_dir_all(".", input)?;
+                let gz = builder.into_inner()?;
+                gz.finish()?;
+            } else {
+                let mut builder = tar::Builder::new(encoder);
+                builder.follow_symlinks(false);
+                builder.append_dir_all(".", input)?;
+                builder.finish()?;
+                drop(builder);
+            }
+            Ok(())
+        },
+    )
 }
 
 pub fn decrypt_file(input: &Path, output: &Path, password: &[u8]) -> Result<()> {
@@ -226,6 +239,7 @@ pub fn decrypt_dir(input: &Path, output: &Path, password: &[u8]) -> Result<()> {
             "this .bml contains a file; use decrypt_file / `aegis decrypt` with a file output",
         ));
     }
+    let compress = header.flags & FLAG_COMPRESSED != 0;
     let key = derive_key(password, &header.salt, header.kdf_params)?;
 
     std::fs::create_dir_all(&tmp_path)?;
@@ -236,13 +250,22 @@ pub fn decrypt_dir(input: &Path, output: &Path, password: &[u8]) -> Result<()> {
     };
 
     let mut decoder = StreamDecoder::new(reader, key, header.nonce_prefix, header_bytes);
-    {
+    // Compute the unpack result in a scope that drops the archive (and the gzip
+    // layer, if any) before we touch `decoder` again for error reporting.
+    let unpack_result = if compress {
+        // Pipeline: AEAD decoder -> gunzip -> tar.
+        let mut archive = tar::Archive::new(GzDecoder::new(&mut decoder));
+        archive.set_overwrite(false);
+        archive.set_preserve_permissions(true);
+        archive.unpack(&tmp_path)
+    } else {
         let mut archive = tar::Archive::new(&mut decoder);
         archive.set_overwrite(false);
         archive.set_preserve_permissions(true);
-        if let Err(e) = archive.unpack(&tmp_path) {
-            return Err(decoder.take_error().unwrap_or(Error::Io(e)));
-        }
+        archive.unpack(&tmp_path)
+    };
+    if let Err(e) = unpack_result {
+        return Err(decoder.take_error().unwrap_or(Error::Io(e)));
     }
 
     // Done writing. Move tmp dir into final place.

@@ -7,8 +7,8 @@ use clap::{CommandFactory, Parser};
 use clap_complete::generate;
 
 use aegis::{
-    FLAG_DIRECTORY, FLAG_KEYFILE, FLAG_MASTER_KEY, HEADER_LEN, Header, KdfParams, decrypt_dir,
-    decrypt_file, encrypt_dir, encrypt_file, peek_header,
+    FLAG_COMPRESSED, FLAG_DIRECTORY, FLAG_KEYFILE, FLAG_MASTER_KEY, HEADER_LEN, Header, KdfParams,
+    decrypt_dir, decrypt_file, encrypt_dir, encrypt_file, peek_header,
 };
 
 mod cli;
@@ -693,12 +693,16 @@ fn cmd_encrypt(
     ask: bool,
     keep: bool,
     keyfile: Option<PathBuf>,
+    compress: bool,
     gui_mode: bool,
 ) -> Result<(), String> {
     if !input.exists() {
         return Err(format!("input does not exist: {}", input.display()));
     }
     let is_dir = input.is_dir();
+    if compress && !is_dir && !gui_mode {
+        eprintln!("note: --compress only applies to directories; ignoring it for this file.");
+    }
     let requested_output = output.unwrap_or_else(|| default_encrypt_output(&input));
     // The encrypted output is always a single .bml file (never a directory).
     let (write_to, finalize_to) = match resolve_output_collision(&requested_output, false, gui_mode)?
@@ -783,7 +787,8 @@ fn cmd_encrypt(
     } else {
         0
     };
-    let extra_flags = master_flag | keyfile_flag;
+    let compress_flag = if compress && is_dir { FLAG_COMPRESSED } else { 0 };
+    let extra_flags = master_flag | keyfile_flag | compress_flag;
     let combined = keyfile::combine(password.as_bytes(), keyfile_digest.as_ref());
 
     if !gui_mode {
@@ -1153,6 +1158,11 @@ fn cmd_info(input: PathBuf, gui_mode: bool) -> Result<(), String> {
     } else {
         "no"
     };
+    let compressed = if header.flags & FLAG_COMPRESSED != 0 {
+        "yes"
+    } else {
+        "no"
+    };
     let payload_bytes = bytes.len().saturating_sub(HEADER_LEN);
 
     if gui_mode {
@@ -1162,6 +1172,7 @@ fn cmd_info(input: PathBuf, gui_mode: bool) -> Result<(), String> {
              Payload kind: {kind}\n\
              Password source: {pwd_source}\n\
              Keyfile required: {needs_keyfile}\n\
+             Compressed: {compressed}\n\
              Flags: 0x{:02X}\n\
              Argon2id memory: {} KiB ({:.1} MiB)\n\
              Argon2id iterations: {}\n\
@@ -1183,6 +1194,7 @@ fn cmd_info(input: PathBuf, gui_mode: bool) -> Result<(), String> {
         println!("Payload kind:         {kind}");
         println!("Password source:      {pwd_source}");
         println!("Keyfile required:     {needs_keyfile}");
+        println!("Compressed:           {compressed}");
         println!("Flags:                0x{:02X}", header.flags);
         println!(
             "Argon2id memory:      {} KiB ({:.1} MiB)",
@@ -1212,7 +1224,8 @@ fn main() -> ExitCode {
             ask,
             keep,
             keyfile,
-        } => cmd_encrypt(input, output, ask, keep, keyfile, gui_mode),
+            compress,
+        } => cmd_encrypt(input, output, ask, keep, keyfile, compress, gui_mode),
         Cmd::Decrypt {
             input,
             output,

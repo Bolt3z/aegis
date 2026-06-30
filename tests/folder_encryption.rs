@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use aegis::{
-    CHUNK_SIZE, Error, FLAG_DIRECTORY, KdfParams, decrypt_dir, decrypt_file, encrypt_dir,
-    encrypt_file, peek_header,
+    CHUNK_SIZE, Error, FLAG_COMPRESSED, FLAG_DIRECTORY, KdfParams, decrypt_dir, decrypt_file,
+    encrypt_dir, encrypt_file, peek_header,
 };
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -195,6 +195,44 @@ fn decrypt_dir_accepts_existing_empty_output_directory() {
     let got = collect_files(&restored);
     let original = collect_files(&src);
     assert_eq!(got, original);
+}
+
+#[test]
+fn folder_round_trip_compressed() {
+    let workspace = fresh_tmpdir("compressed");
+    let src = workspace.join("src");
+    // Highly compressible content plus a nested file.
+    write_file(&src.join("a.txt"), &vec![b'A'; 50_000]);
+    write_file(&src.join("sub/b.log"), "log line\n".repeat(2000).as_bytes());
+    let cipher = workspace.join("archive.bml");
+    let restored = workspace.join("restored");
+
+    encrypt_dir(&src, &cipher, PWD, fast(), FLAG_COMPRESSED).unwrap();
+    let header = peek_header(&cipher).unwrap();
+    assert_eq!(header.flags & FLAG_COMPRESSED, FLAG_COMPRESSED);
+    assert_eq!(header.flags & FLAG_DIRECTORY, FLAG_DIRECTORY);
+
+    decrypt_dir(&cipher, &restored, PWD).unwrap();
+    assert_eq!(collect_files(&restored), collect_files(&src));
+}
+
+#[test]
+fn compressed_archive_is_smaller_for_compressible_data() {
+    let workspace = fresh_tmpdir("compress_size");
+    let src = workspace.join("src");
+    write_file(&src.join("big.txt"), &vec![b'Z'; 200_000]);
+
+    let plain_cipher = workspace.join("plain.bml");
+    let comp_cipher = workspace.join("comp.bml");
+    encrypt_dir(&src, &plain_cipher, PWD, fast(), 0).unwrap();
+    encrypt_dir(&src, &comp_cipher, PWD, fast(), FLAG_COMPRESSED).unwrap();
+
+    let plain_size = fs::metadata(&plain_cipher).unwrap().len();
+    let comp_size = fs::metadata(&comp_cipher).unwrap().len();
+    assert!(
+        comp_size * 2 < plain_size,
+        "compressed {comp_size} should be far smaller than plain {plain_size}"
+    );
 }
 
 #[test]

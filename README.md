@@ -123,7 +123,16 @@ aegis encrypt ~/notes/                      # → notes.bml (tar streaming)
 aegis encrypt --ask important.pdf           # prompts for a one-off password
 aegis encrypt -a -o /tmp/out.bml file.txt   # custom password + custom output
 aegis encrypt --keep document.pdf           # keep the plaintext after encryption
+aegis encrypt --compress ~/notes/           # gzip the folder before encrypting
 ```
+
+**Compression (`--compress` / `-c`)** is opt-in and applies **only to
+directories**: the `tar` stream is gzip-compressed before encryption. It's a no-op
+for single files (most carried files — JPEG/MP4/PDF/Office — are already
+compressed) and is ignored there with a note. It helps a lot for folders of
+text, logs, or source. Decryption auto-detects compression from the header; no
+flag needed. Note: the encrypted size reveals how compressible the content was,
+a minor at-rest information leak — which is why it's off by default.
 
 Defaults:
 - Output path is `<input>.bml` for files, `<basename>.bml` (in the same parent

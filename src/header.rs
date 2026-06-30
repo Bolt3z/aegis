@@ -10,7 +10,9 @@ pub const CHUNK_SIZE: usize = 65536;
 pub const FLAG_DIRECTORY: u8 = 0b0000_0001;
 pub const FLAG_MASTER_KEY: u8 = 0b0000_0010;
 pub const FLAG_KEYFILE: u8 = 0b0000_0100;
-const KNOWN_FLAGS: u8 = FLAG_DIRECTORY | FLAG_MASTER_KEY | FLAG_KEYFILE;
+/// The payload is gzip-compressed before encryption (directories only).
+pub const FLAG_COMPRESSED: u8 = 0b0000_1000;
+const KNOWN_FLAGS: u8 = FLAG_DIRECTORY | FLAG_MASTER_KEY | FLAG_KEYFILE | FLAG_COMPRESSED;
 
 const MAX_MEMORY_KIB: u32 = 4 * 1024 * 1024;
 const MAX_ITERATIONS: u32 = 64;

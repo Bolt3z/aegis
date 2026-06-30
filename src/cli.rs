@@ -54,6 +54,9 @@ pub enum Cmd {
         /// Combine the password with bytes from a keyfile (extra factor; you'll need it to decrypt).
         #[arg(short = 'K', long, value_hint = ValueHint::FilePath)]
         keyfile: Option<PathBuf>,
+        /// Gzip-compress before encrypting. Only applies to directories; ignored for single files.
+        #[arg(short = 'c', long)]
+        compress: bool,
     },
     /// Decrypt a .bml file or directory archive.
     Decrypt {

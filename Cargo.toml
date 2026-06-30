@@ -25,6 +25,7 @@ rpassword = "=7.3.1"
 tar = "0.4"
 keyring = "2"
 blake2 = "0.10"
+flate2 = "1"
 
 [build-dependencies]
 clap = { version = "4.5", features = ["derive"] }
