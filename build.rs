@@ -14,6 +14,14 @@ fn main() -> std::io::Result<()> {
     // distinguishable (the Cargo version stays 0.1.0 across many builds).
     // Falls back to the Cargo version when git isn't available.
     println!("cargo:rerun-if-changed=.git/HEAD");
+    // A commit on the current branch updates the ref file, not .git/HEAD
+    // (which just holds "ref: refs/heads/<branch>"), so watch the ref too —
+    // otherwise the stamped hash goes stale until cli.rs/build.rs change.
+    if let Ok(head) = std::fs::read_to_string(".git/HEAD") {
+        if let Some(refpath) = head.strip_prefix("ref:").map(str::trim) {
+            println!("cargo:rerun-if-changed=.git/{refpath}");
+        }
+    }
     let stamp = std::process::Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
