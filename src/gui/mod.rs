@@ -6,6 +6,17 @@
 //! - Linux: `kdialog` (preferred) / `zenity` (fallback)
 //! - macOS: `osascript` (AppleScript, ships with macOS)
 
+/// User's answer to an "output already exists" prompt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Overwrite {
+    /// Overwrite the existing path.
+    Replace,
+    /// Keep the existing path and write the new one under a `(n)` name.
+    KeepBoth,
+    /// Do nothing.
+    Cancel,
+}
+
 #[cfg(target_os = "linux")]
 mod backend_linux;
 #[cfg(target_os = "linux")]

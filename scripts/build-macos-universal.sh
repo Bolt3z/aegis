@@ -40,6 +40,14 @@ lipo -create \
 
 chmod 755 target/macos/aegis
 
+# Ad-hoc code-signing. An unsigned binary has no stable identity, so macOS
+# forgets the Keychain "Always Allow" choice and re-prompts for the login
+# password on *every* keyring access. An ad-hoc signature (`--sign -`, no
+# certificate needed) gives a stable cdhash, so the consent sticks across runs.
+echo "==> Ad-hoc code-signing the binary…"
+codesign --force --sign - target/macos/aegis
+codesign --verify --verbose=2 target/macos/aegis || true
+
 echo "==> Result:"
 file target/macos/aegis
 ls -lh target/macos/aegis

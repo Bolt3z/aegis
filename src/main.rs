@@ -133,6 +133,166 @@ fn remove_input(input: &Path, is_dir: bool) -> Result<(), String> {
     }
 }
 
+// ---------- output collision handling ----------
+
+/// Append `.tmp` to a path (mirrors the staging suffix used in `file.rs`).
+fn tmp_sibling(p: &Path) -> PathBuf {
+    let mut s: OsString = p.as_os_str().to_os_string();
+    s.push(".tmp");
+    PathBuf::from(s)
+}
+
+/// Build a Windows-style de-duplicated name: `doc.pdf` → `doc (n).pdf`,
+/// `notes` → `notes (n)`. The counter goes before the final extension.
+fn insert_counter(path: &Path, n: u32) -> PathBuf {
+    let parent = path.parent();
+    let stem = path.file_stem().unwrap_or_default();
+    let ext = path.extension();
+    let mut name = stem.to_os_string();
+    name.push(format!(" ({n})"));
+    if let Some(e) = ext {
+        name.push(".");
+        name.push(e);
+    }
+    match parent {
+        Some(p) if !p.as_os_str().is_empty() => p.join(name),
+        _ => PathBuf::from(name),
+    }
+}
+
+/// A candidate output path is free if neither it nor its `.tmp` staging
+/// sibling exist (both would make `file.rs` refuse to write).
+fn path_is_free(p: &Path) -> bool {
+    !p.exists() && !tmp_sibling(p).exists()
+}
+
+/// Find the first free `name (n)` variant of `output`.
+fn unique_path(output: &Path) -> PathBuf {
+    let mut n = 1u32;
+    loop {
+        let cand = insert_counter(output, n);
+        if path_is_free(&cand) || n >= 9999 {
+            return cand;
+        }
+        n += 1;
+    }
+}
+
+/// Whether writing `output` would collide. For a directory payload an existing
+/// *empty* directory is acceptable (matches `decrypt_dir`), so it is not a
+/// collision; everything else that already exists is.
+fn output_collides(output: &Path, is_dir: bool) -> bool {
+    match std::fs::symlink_metadata(output) {
+        Err(_) => false,
+        Ok(md) => {
+            if is_dir && md.is_dir() {
+                std::fs::read_dir(output)
+                    .map(|mut e| e.next().is_some())
+                    .unwrap_or(true)
+            } else {
+                true
+            }
+        }
+    }
+}
+
+/// Outcome of resolving an output collision.
+enum Resolution {
+    /// Write the operation's output to `write_to`. If `finalize_to` is set,
+    /// move `write_to` onto it once the write succeeds (Replace) — the original
+    /// is destroyed only after the new content is safely written, so a failed
+    /// or aborted decrypt never loses it.
+    Go {
+        write_to: PathBuf,
+        finalize_to: Option<PathBuf>,
+    },
+    /// The user chose to cancel; do nothing.
+    Abort,
+}
+
+/// Move a freshly-written `write_to` onto `finalize_to` (Replace semantics).
+fn finalize_replace(write_to: &Path, finalize_to: &Path) -> Result<(), String> {
+    // A directory destination must be removed before rename; rename atomically
+    // replaces a regular-file destination.
+    if let Ok(md) = std::fs::symlink_metadata(finalize_to) {
+        if md.is_dir() {
+            std::fs::remove_dir_all(finalize_to).map_err(|e| e.to_string())?;
+        }
+    }
+    std::fs::rename(write_to, finalize_to).map_err(|e| e.to_string())
+}
+
+fn cli_ask_overwrite(output: &Path, alt_name: &str) -> Result<gui::Overwrite, String> {
+    use std::io::Write;
+    eprintln!("Output already exists: {}", output.display());
+    eprint!("[R]eplace, [K]eep both (as \"{alt_name}\"), or [C]ancel? [K] ");
+    std::io::stderr().flush().map_err(|e| e.to_string())?;
+    let mut line = String::new();
+    std::io::stdin()
+        .read_line(&mut line)
+        .map_err(|e| e.to_string())?;
+    match line.trim().to_lowercase().as_str() {
+        "r" | "replace" => Ok(gui::Overwrite::Replace),
+        "c" | "cancel" => Ok(gui::Overwrite::Cancel),
+        _ => Ok(gui::Overwrite::KeepBoth),
+    }
+}
+
+/// Resolve an output-path collision. When `output` is free, proceeds with it
+/// unchanged. Otherwise asks the user (GUI dialog or CLI prompt) to Replace,
+/// Keep Both (auto-rename), or Cancel.
+fn resolve_output_collision(
+    output: &Path,
+    is_dir: bool,
+    gui_mode: bool,
+) -> Result<Resolution, String> {
+    if !output_collides(output, is_dir) {
+        return Ok(Resolution::Go {
+            write_to: output.to_path_buf(),
+            finalize_to: None,
+        });
+    }
+    let alt = unique_path(output);
+    let alt_name = alt
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| alt.display().to_string());
+
+    let choice = if gui_mode {
+        if gui::is_available() {
+            let body = format!(
+                "Something already exists at:\n{}\n\n\
+                 • Replace — overwrite it\n\
+                 • Keep Both — save the new one as \u{201c}{}\u{201d}\n\
+                 • Cancel — do nothing",
+                output.display(),
+                alt_name,
+            );
+            gui::ask_overwrite("Aegis — File exists", &body)?
+        } else {
+            // Not a terminal and no dialog backend: nobody to ask, so keep the
+            // old conservative behavior and refuse to clobber.
+            return Err(format!("output already exists: {}", output.display()));
+        }
+    } else {
+        cli_ask_overwrite(output, &alt_name)?
+    };
+
+    match choice {
+        // Replace: write to the free `alt` path, then swap onto `output` only
+        // after the operation succeeds (see `finalize_replace`).
+        gui::Overwrite::Replace => Ok(Resolution::Go {
+            write_to: alt,
+            finalize_to: Some(output.to_path_buf()),
+        }),
+        gui::Overwrite::KeepBoth => Ok(Resolution::Go {
+            write_to: alt,
+            finalize_to: None,
+        }),
+        gui::Overwrite::Cancel => Ok(Resolution::Abort),
+    }
+}
+
 /// Ask the user to confirm a destructive action. In gui_mode uses kdialog/zenity;
 /// in CLI mode reads y/n from stdin. In true-headless gui_mode (no backend
 /// available) returns Ok(true) — honoring the documented default.
@@ -387,6 +547,44 @@ fn decide_encrypt_options(
     }
 
     let master_set = keychain::is_set().unwrap_or(false);
+
+    // First-time setup from the GUI: if no master exists yet (and the user
+    // didn't force --ask), offer to create one right here, so the master mode
+    // is usable from Finder/Dolphin without dropping to the terminal.
+    if !ask && !master_set {
+        let body = format!(
+            "No master password is set yet.\nHow do you want to encrypt this {kind}?\n{input_display}"
+        );
+        let items: &[(&str, &str, bool)] = &[
+            (
+                "set",
+                "Set a master password now (saved in your keyring)",
+                true,
+            ),
+            (
+                "custom",
+                "Use a one-off custom password (for sharing)",
+                false,
+            ),
+        ];
+        match gui::choose_radio("Aegis — First-time setup", &body, items)? {
+            Some(s) if s == "set" => {
+                let pwd = match gui::password_new(
+                    "Aegis — Set master password",
+                    "Choose a master password.\nIt is saved in your system keyring and used by default for encryption.",
+                )? {
+                    Some(p) => p,
+                    None => return Err("cancelled by user".into()),
+                };
+                keychain::set_master(&pwd).map_err(|e| e.to_string())?;
+                // Master now stored → use it (CLI --keyfile still honored).
+                return Ok((false, keyfile_cli));
+            }
+            Some(_) => return Ok((true, keyfile_cli)),
+            None => return Err("cancelled by user".into()),
+        }
+    }
+
     let pwd_decided = ask || !master_set; // !master_set forces custom anyway
     let keyfile_decided = keyfile_cli.is_some();
 
@@ -501,14 +699,16 @@ fn cmd_encrypt(
         return Err(format!("input does not exist: {}", input.display()));
     }
     let is_dir = input.is_dir();
-    let output = output.unwrap_or_else(|| default_encrypt_output(&input));
-    if output.exists() {
-        let msg = format!("output already exists: {}", output.display());
-        if gui_mode {
-            gui::show_error(&msg);
-        }
-        return Err(msg);
-    }
+    let requested_output = output.unwrap_or_else(|| default_encrypt_output(&input));
+    // The encrypted output is always a single .bml file (never a directory).
+    let (write_to, finalize_to) = match resolve_output_collision(&requested_output, false, gui_mode)?
+    {
+        Resolution::Go {
+            write_to,
+            finalize_to,
+        } => (write_to, finalize_to),
+        Resolution::Abort => return Ok(()),
+    };
 
     let kind = if is_dir { "directory" } else { "file" };
 
@@ -589,8 +789,20 @@ fn cmd_encrypt(
     if !gui_mode {
         eprintln!("Deriving key with Argon2id (~1s)…");
     }
-    match do_encrypt(&input, &output, is_dir, &combined, extra_flags) {
+    match do_encrypt(&input, &write_to, is_dir, &combined, extra_flags) {
         Ok(()) => {
+            // Replace: the .bml is fully written, so swap it onto the existing
+            // file now. No-op for the no-collision and Keep Both cases.
+            if let Some(dest) = &finalize_to {
+                if let Err(e) = finalize_replace(&write_to, dest) {
+                    let msg = format!("Encrypted, but could not replace {}: {e}", dest.display());
+                    if gui_mode {
+                        gui::show_error(&msg);
+                    }
+                    return Err(msg);
+                }
+            }
+            let final_output = finalize_to.as_deref().unwrap_or(&write_to);
             let deleted = match maybe_delete_after_encrypt(&input, is_dir, keep, gui_mode) {
                 Ok(d) => d,
                 Err(e) => {
@@ -598,7 +810,7 @@ fn cmd_encrypt(
                     // without claiming the original is gone.
                     let msg = format!(
                         "Encrypted: {}\nFailed to remove original: {e}",
-                        output.display()
+                        final_output.display()
                     );
                     if gui_mode {
                         gui::show_error(&msg);
@@ -614,9 +826,9 @@ fn cmd_encrypt(
                 " (original kept on user request)"
             };
             if gui_mode {
-                gui::show_info(&format!("Encrypted:\n{}{}", output.display(), tail));
+                gui::show_info(&format!("Encrypted:\n{}{}", final_output.display(), tail));
             } else {
-                println!("Encrypted: {}{}", output.display(), tail);
+                println!("Encrypted: {}{}", final_output.display(), tail);
             }
             Ok(())
         }
@@ -671,6 +883,19 @@ fn cmd_decrypt(
         })?,
     };
 
+    // If the destination already exists, ask before clobbering it: Replace,
+    // Keep Both (write to `name (n)`), or Cancel. This commonly happens after
+    // `encrypt --keep`, when the plaintext is still next to the .bml. Replace
+    // is staged (write to a temp name, swap on success) so a wrong-password
+    // decrypt never destroys the file that was already there.
+    let (write_to, finalize_to) = match resolve_output_collision(&output, is_dir, gui_mode)? {
+        Resolution::Go {
+            write_to,
+            finalize_to,
+        } => (write_to, finalize_to),
+        Resolution::Abort => return Ok(()),
+    };
+
     // Obtain the keyfile path: from CLI flag, or via picker in GUI mode, or
     // error out in CLI mode.
     let keyfile_path = if needs_keyfile {
@@ -721,7 +946,7 @@ fn cmd_decrypt(
         match keychain::get_master() {
             Ok(Some(master)) => {
                 let combined = keyfile::combine(master.as_bytes(), digest_ref);
-                match do_decrypt(&input, &output, is_dir, &combined) {
+                match do_decrypt(&input, &write_to, is_dir, &combined) {
                     Ok(()) => {
                         decrypted_via_master = true;
                     }
@@ -757,11 +982,26 @@ fn cmd_decrypt(
     if !decrypted_via_master {
         // Prompt-based decryption (GUI = up to 3 attempts, CLI = single attempt).
         if gui_mode {
-            decrypt_gui_prompt(&input, &output, is_dir, was_master, digest_ref)?;
+            decrypt_gui_prompt(&input, &write_to, is_dir, was_master, digest_ref)?;
         } else {
-            decrypt_cli_prompt(&input, &output, is_dir, was_master, digest_ref)?;
+            decrypt_cli_prompt(&input, &write_to, is_dir, was_master, digest_ref)?;
         }
     }
+
+    // Decryption succeeded. For Replace, swap the freshly-written output onto
+    // the file that was already there (a no-op for no-collision / Keep Both).
+    let output = if let Some(dest) = &finalize_to {
+        finalize_replace(&write_to, dest).map_err(|e| {
+            let msg = format!("Decrypted, but could not replace {}: {e}", dest.display());
+            if gui_mode {
+                gui::show_error(&msg);
+            }
+            msg
+        })?;
+        dest.clone()
+    } else {
+        write_to
+    };
 
     finish_decrypt(&input, &output, keep, gui_mode)
 }
@@ -994,5 +1234,53 @@ fn main() -> ExitCode {
             eprintln!("aegis: error: {msg}");
             ExitCode::from(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counter_inserts_before_extension() {
+        assert_eq!(
+            insert_counter(Path::new("/a/b/doc.pdf"), 1),
+            PathBuf::from("/a/b/doc (1).pdf")
+        );
+        assert_eq!(
+            insert_counter(Path::new("doc.pdf"), 2),
+            PathBuf::from("doc (2).pdf")
+        );
+    }
+
+    #[test]
+    fn counter_without_extension() {
+        assert_eq!(
+            insert_counter(Path::new("/a/notes"), 3),
+            PathBuf::from("/a/notes (3)")
+        );
+    }
+
+    #[test]
+    fn counter_keeps_only_last_extension() {
+        // Mirrors how the .bml default output (`document.pdf`) gets numbered.
+        assert_eq!(
+            insert_counter(Path::new("archive.tar.gz"), 1),
+            PathBuf::from("archive.tar (1).gz")
+        );
+    }
+
+    #[test]
+    fn unique_path_walks_until_free() {
+        let dir = std::env::temp_dir().join(format!("aegis-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let base = dir.join("file.txt");
+        std::fs::write(&base, b"x").unwrap();
+        // base is taken, "file (1).txt" is free.
+        assert_eq!(unique_path(&base), dir.join("file (1).txt"));
+        // Now occupy "file (1).txt" too → expect "file (2).txt".
+        std::fs::write(dir.join("file (1).txt"), b"x").unwrap();
+        assert_eq!(unique_path(&base), dir.join("file (2).txt"));
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

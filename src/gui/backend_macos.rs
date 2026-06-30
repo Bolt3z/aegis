@@ -8,6 +8,8 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Command, Output, Stdio};
 
+use super::Overwrite;
+
 /// Escape a string for inclusion as an AppleScript string literal.
 /// Wraps in double quotes and escapes `"` and `\`.
 fn as_quoted(s: &str) -> String {
@@ -127,6 +129,33 @@ pub fn show_info(text: &str) {
         body = as_quoted(text),
     );
     let _ = run_script(&script);
+}
+
+/// Three-way "file exists" prompt: Replace / Keep Both / Cancel.
+///
+/// A button literally named "Cancel" is treated by AppleScript as the cancel
+/// button, so both clicking it and pressing Escape raise error -128, which we
+/// catch and map to `Cancel`.
+pub fn ask_overwrite(title: &str, body: &str) -> Result<Overwrite, String> {
+    let script = format!(
+        r#"try
+    set _r to display dialog {body} with title {title} buttons {{"Cancel","Replace","Keep Both"}} default button "Keep Both"
+    return button returned of _r
+on error number -128
+    return "Cancel"
+end try"#,
+        body = as_quoted(body),
+        title = as_quoted(title),
+    );
+    let out = run_script(&script)?;
+    if !out.status.success() {
+        return Ok(Overwrite::Cancel);
+    }
+    match trimmed_stdout(&out).as_str() {
+        "Replace" => Ok(Overwrite::Replace),
+        "Keep Both" => Ok(Overwrite::KeepBoth),
+        _ => Ok(Overwrite::Cancel),
+    }
 }
 
 pub fn confirm(title: &str, body: &str) -> Result<bool, String> {

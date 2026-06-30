@@ -1,5 +1,7 @@
 use std::process::{Command, Stdio};
 
+use super::Overwrite;
+
 #[derive(Clone, Copy, Debug)]
 enum Backend {
     Kdialog,
@@ -154,6 +156,62 @@ pub fn pick_file(title: &str, start_dir: &str) -> Result<Option<std::path::PathB
                 .output()
                 .map_err(|e| e.to_string())?;
             Ok(capture_stdout(out).map(std::path::PathBuf::from))
+        }
+    }
+}
+
+/// Three-way "file exists" prompt: Replace / Keep Both / Cancel.
+pub fn ask_overwrite(title: &str, body: &str) -> Result<Overwrite, String> {
+    match detect_backend()? {
+        Backend::Kdialog => {
+            // --warningyesnocancel exit codes: 0 = Yes, 1 = No, 2 = Cancel.
+            let status = Command::new("kdialog")
+                .args([
+                    "--title",
+                    title,
+                    "--warningyesnocancel",
+                    body,
+                    "--yes-label",
+                    "Keep Both",
+                    "--no-label",
+                    "Replace",
+                    "--cancel-label",
+                    "Cancel",
+                ])
+                .status()
+                .map_err(|e| e.to_string())?;
+            match status.code() {
+                Some(0) => Ok(Overwrite::KeepBoth),
+                Some(1) => Ok(Overwrite::Replace),
+                _ => Ok(Overwrite::Cancel),
+            }
+        }
+        Backend::Zenity => {
+            // OK = Keep Both, the extra button = Replace (printed to stdout),
+            // anything else (Cancel / closed) = Cancel.
+            let out = Command::new("zenity")
+                .args([
+                    "--question",
+                    "--title",
+                    title,
+                    "--text",
+                    body,
+                    "--ok-label",
+                    "Keep Both",
+                    "--cancel-label",
+                    "Cancel",
+                    "--extra-button",
+                    "Replace",
+                ])
+                .output()
+                .map_err(|e| e.to_string())?;
+            if String::from_utf8_lossy(&out.stdout).trim() == "Replace" {
+                Ok(Overwrite::Replace)
+            } else if out.status.success() {
+                Ok(Overwrite::KeepBoth)
+            } else {
+                Ok(Overwrite::Cancel)
+            }
         }
     }
 }

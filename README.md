@@ -82,7 +82,16 @@ Right-click any file or folder in Finder → **Quick Actions** (or
 
 The master password is stored in your **login Keychain** (`aegis init`),
 unlocked automatically when you log in. The Keychain backend works
-exactly like kwallet on Linux from the tool's perspective.
+exactly like kwallet on Linux from the tool's perspective. You don't have
+to run `aegis init` in the terminal: the first time you encrypt something
+from the Finder Quick Action with no master set, Aegis offers to create one
+in a dialog.
+
+> **Keychain prompt.** The first time Aegis reads the master from the
+> Keychain, macOS asks for your login password — click **Always Allow** and
+> it won't ask again. The `.pkg` ships an **ad-hoc code signature** so that
+> "Always Allow" actually persists; without it an unsigned binary would
+> re-prompt on every single run.
 
 Uninstall (no automated uninstaller; manual removal is two paths):
 
@@ -147,6 +156,15 @@ removed, Aegis falls back to a prompt automatically — you can still recover
 old files by typing the old master.
 
 Output path defaults to the input with `.bml` stripped.
+
+**If the destination already exists** (typical after `encrypt --keep`, when the
+plaintext is still next to the `.bml`), Aegis no longer aborts. It asks what to
+do: **Replace** (overwrite), **Keep Both** — saves the new file under a
+Windows-style numbered name (`document (1).pdf`, `document (2).pdf`, …) — or
+**Cancel**. The same prompt applies to `encrypt` when the `.bml` output already
+exists. In GUI mode it's a dialog; in a terminal it's an `[R]/[K]/[C]` prompt
+(default Keep Both). In a fully headless context (no terminal and no dialog
+backend) there's nobody to ask, so Aegis still refuses to overwrite.
 
 **Like `encrypt`, decrypt removes its input on success** (the encrypted
 `.bml`) unless `--keep` / `-k` is passed. You get the same interactive
