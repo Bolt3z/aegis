@@ -1,0 +1,68 @@
+[package]
+name = "aegis"
+version = "0.1.0"
+edition = "2024"
+description = "Aegis — personal file/folder encryption tool (XChaCha20-Poly1305 + Argon2id, CLI and KDE/zenity GUI prompts)."
+license = "MIT"
+authors = ["Edoardo Besana <edokikka@gmail.com>"]
+
+[lib]
+name = "aegis"
+path = "src/lib.rs"
+
+[[bin]]
+name = "aegis"
+path = "src/main.rs"
+
+[dependencies]
+chacha20poly1305 = "0.10"
+argon2 = "0.5"
+zeroize = { version = "1.8", features = ["derive"] }
+getrandom = "0.2"
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = "4.5"
+rpassword = "=7.3.1"
+tar = "0.4"
+keyring = "2"
+blake2 = "0.10"
+
+[build-dependencies]
+clap = { version = "4.5", features = ["derive"] }
+clap_complete = "4.5"
+
+[dev-dependencies]
+hex = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = true
+
+[package.metadata.deb]
+maintainer = "Edoardo Besana <edokikka@gmail.com>"
+copyright = "2026, Edoardo Besana <edokikka@gmail.com>"
+extended-description = """\
+Aegis is a personal file and directory encryption tool that uses
+XChaCha20-Poly1305 for authenticated streaming encryption and Argon2id for
+password-based key derivation. Designed for protecting files stored on USB
+drives, cloud sync folders, or email attachments. NOT a replacement for
+full-disk encryption — for that, use LUKS.
+
+Provides:
+  * CLI flow with rpassword prompt (encrypt + decrypt).
+  * GUI flow via kdialog (preferred) or zenity (fallback), auto-detected
+    when launched outside a terminal, or forced with --gui.
+  * Atomic, mode-0600 output files; tampered or truncated archives are
+    detected via per-chunk AEAD tags."""
+section = "utils"
+priority = "optional"
+depends = "$auto"
+recommends = "kdialog | zenity"
+assets = [
+    ["target/release/aegis", "usr/bin/", "755"],
+    ["target/completions/aegis.bash", "usr/share/bash-completion/completions/aegis", "644"],
+    ["target/completions/_aegis", "usr/share/zsh/vendor-completions/_aegis", "644"],
+    ["target/completions/aegis.fish", "usr/share/fish/vendor_completions.d/aegis.fish", "644"],
+    ["packaging/aegis.desktop", "usr/share/kio/servicemenus/aegis.desktop", "644"],
+]

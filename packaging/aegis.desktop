@@ -1,0 +1,27 @@
+[Desktop Entry]
+Type=Service
+Name=Aegis
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/all;inode/directory;
+X-KDE-Submenu=Aegis
+X-KDE-Priority=TopLevel
+Icon=document-encrypt
+Actions=Encrypt;Decrypt;Info;
+
+[Desktop Action Encrypt]
+Name=Encrypt with Aegis
+Name[it]=Cifra con Aegis
+Icon=document-encrypt
+Exec=aegis --gui encrypt %f
+
+[Desktop Action Decrypt]
+Name=Decrypt with Aegis
+Name[it]=Decifra con Aegis
+Icon=document-decrypt
+Exec=aegis --gui decrypt %f
+
+[Desktop Action Info]
+Name=Show Aegis header info
+Name[it]=Mostra info header Aegis
+Icon=dialog-information
+Exec=aegis --gui info %f

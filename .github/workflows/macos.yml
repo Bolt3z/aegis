@@ -1,0 +1,39 @@
+name: macOS build
+
+# Compila il binario universale (Intel + Apple Silicon) e crea il .pkg
+# su un runner macOS reale fornito da GitHub. Non serve avere un Mac.
+on:
+  push:
+    branches: [main, master]
+    tags: ['v*']
+  workflow_dispatch:        # permette di lanciarlo a mano dalla tab "Actions"
+
+jobs:
+  build-macos:
+    runs-on: macos-latest   # runner macOS reale (hardware Apple nel cloud)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Build universal binary + .pkg
+        run: bash scripts/build-all-macos.sh
+
+      - name: Upload .pkg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aegis-macos-universal-pkg
+          path: target/macos/*.pkg
+          if-no-files-found: error
+
+      # Solo quando pushi un tag tipo v0.1.0: crea una Release GitHub
+      # con il .pkg allegato (link di download diretto, niente login).
+      - name: Attach .pkg to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/macos/*.pkg
