@@ -68,18 +68,18 @@ The `.pkg` installs:
 
 - `/usr/local/bin/aegis` (already in `$PATH` on macOS)
 - Finder **Quick Actions** in `/Library/Services/`:
-  - `Aegis - Protect` — encrypt with your saved password (one click)
-  - `Aegis - Protect with photo` — your password **+** a photo as a second key
-  - `Aegis - Protect to share` — a one-off password to give the recipient
-  - `Aegis - Protect (menu)` — a single entry that asks which of the above
-  - `Aegis - Open` — decrypt (auto-detects what the file needs)
+  - `Aegis - Encrypt` — encrypt with your saved password (one click)
+  - `Aegis - Encrypt with photo` — your password **+** a photo as a second key
+  - `Aegis - Encrypt to share` — a one-off password to give the recipient
+  - `Aegis - Encrypt (menu)` — a single entry that asks which of the above
+  - `Aegis - Decrypt` — decrypt (auto-detects what the file needs)
   - `Aegis - Info` — show the header without decrypting
 
 Right-click any file or folder in Finder → **Quick Actions** (or
 **Services** on older macOS) → pick an action.
 
 > Two styles ship side by side so you can pick what you like: the separate
-> `Protect…` entries (one click each) and the single `Protect (menu)` entry
+> `Encrypt…` entries (one click each) and the single `Encrypt (menu)` entry
 > (one entry, then a small menu). Keep whichever you prefer.
 
 > **First-run Gatekeeper warning.** The `.pkg` is not code-signed (no Apple
@@ -261,14 +261,15 @@ The `.deb` ships a service menu at
 `/usr/share/kio/servicemenus/aegis.desktop`. Right-click any file or folder
 in Dolphin and the **Aegis** submenu offers, by intent:
 
-- **Protect (for me)** — encrypt with your saved master password, no questions.
-- **Protect with a photo** — master password **+** a photo as a second key (you
+- **Encrypt (for me)** — encrypt with your saved master password, no questions.
+- **Encrypt with a photo** — master password **+** a photo as a second key (you
   pick a photo and Aegis freezes a copy of it).
-- **Protect to share** — a one-off password to communicate to the recipient;
+- **Encrypt to share** — a one-off password to communicate to the recipient;
   the resulting `.bml` won't reach into anyone's keyring, it just asks for that
-  password. You can also tick "add a photo" in that flow.
-- **Open (decrypt)** — decrypt, auto-detecting whether the file needs your
-  master, a typed password, or a photo/key.
+  password. With zenity installed, the password and the "add a photo?" choice
+  appear in a single dialog; otherwise it's two quick prompts.
+- **Decrypt** — decrypt, auto-detecting whether the file needs your master, a
+  typed password, or a photo/key.
 - **Show header info** — inspect without decrypting.
 
 The actions run with `--gui` so prompts use kdialog and successes/errors show

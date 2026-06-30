@@ -7,29 +7,29 @@ X-KDE-Submenu=Aegis
 X-KDE-Submenu[it]=Aegis
 X-KDE-Priority=TopLevel
 Icon=document-encrypt
-Actions=Protect;ProtectPhoto;ProtectShare;Open;Info;
+Actions=Encrypt;EncryptPhoto;EncryptShare;Decrypt;Info;
 
-[Desktop Action Protect]
-Name=Protect (for me)
-Name[it]=Proteggi (per me)
+[Desktop Action Encrypt]
+Name=Encrypt (for me)
+Name[it]=Cifra (per me)
 Icon=document-encrypt
 Exec=aegis --gui encrypt %f
 
-[Desktop Action ProtectPhoto]
-Name=Protect with a photo
-Name[it]=Proteggi con una foto
+[Desktop Action EncryptPhoto]
+Name=Encrypt with a photo
+Name[it]=Cifra con una foto
 Icon=document-encrypt
 Exec=aegis --gui encrypt --photo %f
 
-[Desktop Action ProtectShare]
-Name=Protect to share
-Name[it]=Proteggi per inviare
+[Desktop Action EncryptShare]
+Name=Encrypt to share
+Name[it]=Cifra per inviare
 Icon=document-encrypt
 Exec=aegis --gui encrypt --ask %f
 
-[Desktop Action Open]
-Name=Open (decrypt)
-Name[it]=Apri (decifra)
+[Desktop Action Decrypt]
+Name=Decrypt
+Name[it]=Decifra
 Icon=document-decrypt
 Exec=aegis --gui decrypt %f
 

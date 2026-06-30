@@ -82,13 +82,54 @@ pub fn password_ask(title: &str, body: &str) -> Result<Option<String>, String> {
     }
 }
 
-/// Ask for a one-off password and then whether to add a photo second factor.
-/// kdialog/zenity can't combine a password field with a checkbox, so it's two
-/// dialogs. Returns (password, wants_photo), or None if cancelled.
+/// Ask for a one-off password and whether to add a photo second factor.
+///
+/// `zenity --forms` can show the password field and a Yes/No selector in a
+/// SINGLE dialog, so we prefer it here even when kdialog is the primary
+/// backend (kdialog has no way to combine a password input with a checkbox).
+/// Falls back to a two-step kdialog flow when zenity isn't installed.
+/// Returns (password, wants_photo), or None if cancelled.
 pub fn password_with_photo_option(
     title: &str,
     body: &str,
 ) -> Result<Option<(String, bool)>, String> {
+    if cmd_available("zenity") {
+        // Password on top, photo selector below (matches the desired layout).
+        // Tab separator + rsplit keeps the password intact.
+        let out = Command::new("zenity")
+            .args([
+                "--forms",
+                "--title",
+                title,
+                "--text",
+                body,
+                "--separator",
+                "\t",
+                "--add-password",
+                "Password",
+                "--add-combo",
+                "Also use a photo as a second key?",
+                "--combo-values",
+                "No|Yes",
+            ])
+            .output()
+            .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Ok(None);
+        }
+        let raw = String::from_utf8_lossy(&out.stdout);
+        let raw = raw.trim_end_matches(['\n', '\r']);
+        if raw.is_empty() {
+            return Ok(None);
+        }
+        let (pwd, choice) = raw.rsplit_once('\t').unwrap_or((raw, ""));
+        if pwd.is_empty() {
+            return Ok(None);
+        }
+        return Ok(Some((pwd.to_string(), choice == "Yes")));
+    }
+
+    // kdialog fallback: password, then a separate Yes/No.
     let pwd = match password_ask(title, body)? {
         Some(p) => p,
         None => return Ok(None),

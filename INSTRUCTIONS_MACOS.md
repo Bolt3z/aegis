@@ -100,10 +100,10 @@ Oppure log-out + log-in.
 
 Test: in Finder, tasto destro su un file qualunque dentro `~/Documenti`
 → menu **Quick Actions** (o **Services** su macOS più vecchi) → trovi
-`Aegis - Protect`, `Aegis - Protect with photo`, `Aegis - Protect to share`,
-`Aegis - Protect (menu)`, `Aegis - Open`, `Aegis - Info`.
+`Aegis - Encrypt`, `Aegis - Encrypt with photo`, `Aegis - Encrypt to share`,
+`Aegis - Encrypt (menu)`, `Aegis - Decrypt`, `Aegis - Info`.
 
-(Le due voci "Protect…" separate e la singola "Protect (menu)" sono due
+(Le tre voci "Encrypt…" separate e la singola "Encrypt (menu)" sono due
 versioni alternative dello stesso flusso: provale e teniamo quella che
 preferisci.)
 

@@ -12,7 +12,7 @@
 			<key>NSMenuItem</key>
 			<dict>
 				<key>default</key>
-				<string>Aegis - Protect to share</string>
+				<string>Aegis - Encrypt to share</string>
 			</dict>
 			<key>NSMessage</key>
 			<string>runWorkflowAsService</string>
