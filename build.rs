@@ -10,6 +10,20 @@ fn main() -> std::io::Result<()> {
     println!("cargo:rerun-if-changed=src/cli.rs");
     println!("cargo:rerun-if-changed=build.rs");
 
+    // Embed the git short hash in the version string so `aegis --version`
+    // distinguishes builds (the Cargo version stays 0.1.0 across many builds).
+    println!("cargo:rerun-if-changed=.git/HEAD");
+    let hash = std::process::Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "unknown".to_string());
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_default();
+    println!("cargo:rustc-env=AEGIS_VERSION={version} ({hash})");
+
     let outdir =
         PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR not set"))
             .join("target")

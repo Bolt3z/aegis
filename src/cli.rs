@@ -3,8 +3,16 @@ use std::path::PathBuf;
 use clap::{Parser, Subcommand, ValueHint};
 use clap_complete::Shell;
 
+/// Version string: Cargo version plus the git short hash, set by `build.rs`.
+/// Falls back to the plain Cargo version when built outside the build script
+/// (e.g. while `build.rs` itself compiles this file).
+const VERSION: &str = match option_env!("AEGIS_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
 #[derive(Parser)]
-#[command(name = "aegis", version, about = "Aegis — personal file/folder encryption")]
+#[command(name = "aegis", version = VERSION, about = "Aegis — personal file/folder encryption")]
 pub struct Cli {
     /// Force GUI dialogs for password prompts (kdialog or zenity).
     #[arg(long, global = true, conflicts_with = "no_gui")]
