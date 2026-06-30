@@ -100,7 +100,12 @@ Oppure log-out + log-in.
 
 Test: in Finder, tasto destro su un file qualunque dentro `~/Documenti`
 → menu **Quick Actions** (o **Services** su macOS più vecchi) → trovi
-`Aegis - Encrypt`, `Aegis - Decrypt`, `Aegis - Info`.
+`Aegis - Protect`, `Aegis - Protect with photo`, `Aegis - Protect to share`,
+`Aegis - Protect (menu)`, `Aegis - Open`, `Aegis - Info`.
+
+(Le due voci "Protect…" separate e la singola "Protect (menu)" sono due
+versioni alternative dello stesso flusso: provale e teniamo quella che
+preferisci.)
 
 ## 6. Cosa fare se qualcosa non compila
 

@@ -90,6 +90,39 @@ pub fn password_ask(title: &str, body: &str) -> Result<Option<String>, String> {
     password_dialog(title, body)
 }
 
+/// Ask for a one-off password and, in the same dialog, let the user opt into a
+/// photo second factor via an extra button (osascript can't show a checkbox).
+/// Returns (password, wants_photo), or None if cancelled / empty.
+pub fn password_with_photo_option(
+    title: &str,
+    body: &str,
+) -> Result<Option<(String, bool)>, String> {
+    let script = format!(
+        r#"try
+    set _r to display dialog {body} with title {title} default answer "" with hidden answer buttons {{"Cancel","OK + photo","OK"}} default button "OK"
+    return (button returned of _r) & "\n" & (text returned of _r)
+on error number -128
+    return "__CANCEL__"
+end try"#,
+        body = as_quoted(body),
+        title = as_quoted(title),
+    );
+    let out = run_script(&script)?;
+    if !out.status.success() {
+        return Ok(None);
+    }
+    let raw = String::from_utf8_lossy(&out.stdout);
+    let raw = raw.trim_end_matches(['\n', '\r']);
+    if raw == "__CANCEL__" {
+        return Ok(None);
+    }
+    let (button, pwd) = raw.split_once('\n').unwrap_or((raw, ""));
+    if pwd.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some((pwd.to_string(), button == "OK + photo")))
+}
+
 fn password_dialog(title: &str, body: &str) -> Result<Option<String>, String> {
     let script = format!(
         r#"try

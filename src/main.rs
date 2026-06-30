@@ -533,140 +533,201 @@ fn cmd_keyfile_gen(
 
 // ---------- encrypt ----------
 
-/// Decide (effective_ask, effective_keyfile) given CLI flags and GUI menus.
-/// CLI flags (--ask, --keyfile) always win; GUI fills in anything left to decide.
-fn decide_encrypt_options(
+/// Aegis config dir for frozen photos/keyfiles:
+/// `$XDG_CONFIG_HOME/aegis/keys` or `~/.config/aegis/keys`. A chosen photo is
+/// copied here so it can't be re-compressed or moved out from under us.
+fn keys_dir() -> PathBuf {
+    if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+        if !xdg.is_empty() {
+            return PathBuf::from(xdg).join("aegis").join("keys");
+        }
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".config").join("aegis").join("keys")
+}
+
+/// Where the photo picker opens: ~/Pictures if present, else $HOME.
+fn photo_start_dir() -> String {
+    if let Ok(home) = std::env::var("HOME") {
+        let pics = Path::new(&home).join("Pictures");
+        if pics.is_dir() {
+            return pics.to_string_lossy().into_owned();
+        }
+        return home;
+    }
+    "/".to_string()
+}
+
+/// Where the decrypt key picker opens: the frozen-keys dir if it has anything,
+/// else the generic keyfile start dir (USB mounts / home).
+fn key_picker_start_dir() -> String {
+    let kd = keys_dir();
+    let has_keys = std::fs::read_dir(&kd)
+        .map(|mut e| e.next().is_some())
+        .unwrap_or(false);
+    if has_keys {
+        kd.to_string_lossy().into_owned()
+    } else {
+        keyfile_start_dir()
+    }
+}
+
+/// Copy a chosen photo into `dir` so its bytes can't change later.
+/// Deduplicates: an identical frozen copy is reused; a same-named but different
+/// file gets a `(n)` suffix. Returns the frozen path.
+fn freeze_photo_into(dir: &Path, src: &Path) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| format!("cannot create keys dir: {e}"))?;
+    let filename = src
+        .file_name()
+        .ok_or_else(|| "invalid photo path".to_string())?;
+    let src_digest = keyfile::digest_file(src)?;
+    let mut target = dir.join(filename);
+    if target.exists() {
+        if keyfile::digest_file(&target)
+            .map(|d| d == src_digest)
+            .unwrap_or(false)
+        {
+            return Ok(target); // identical copy already frozen — reuse it
+        }
+        target = unique_path(&target);
+    }
+    std::fs::copy(src, &target).map_err(|e| format!("cannot copy photo: {e}"))?;
+    Ok(target)
+}
+
+/// Freeze a chosen photo into the Aegis keys dir.
+fn freeze_photo(src: &Path) -> Result<PathBuf, String> {
+    freeze_photo_into(&keys_dir(), src)
+}
+
+/// GUI-only: let the user pick a photo, then freeze a copy of it.
+fn pick_and_freeze_photo() -> Result<PathBuf, String> {
+    gui::show_info(
+        "Choose a photo to use as a second key.\nAegis saves a copy that won't change.",
+    );
+    let picked = match gui::pick_file("Aegis — Choose the photo", photo_start_dir().as_str())? {
+        Some(p) => p,
+        None => return Err("cancelled by user (no photo chosen)".into()),
+    };
+    freeze_photo(&picked)
+}
+
+/// First-time GUI setup when no master exists: offer to create one, or fall
+/// back to a one-off password. Returns (password, master_flag), or None if the
+/// user cancelled.
+fn gui_first_time_master(kind: &str, input_display: &str) -> Result<Option<(String, u8)>, String> {
+    let body = format!(
+        "No master password is set yet.\nHow do you want to protect this {kind}?\n{input_display}"
+    );
+    let items: &[(&str, &str, bool)] = &[
+        (
+            "set",
+            "Set a master password now (saved in your keyring)",
+            true,
+        ),
+        ("custom", "Use a one-off password instead", false),
+    ];
+    match gui::choose_radio("Aegis — First-time setup", &body, items)? {
+        Some(s) if s == "set" => {
+            let pwd = match gui::password_new(
+                "Aegis — Set master password",
+                "Choose a master password.\nIt is saved in your system keyring and used by default.",
+            )? {
+                Some(p) => p,
+                None => return Ok(None),
+            };
+            keychain::set_master(&pwd).map_err(|e| e.to_string())?;
+            Ok(Some((pwd, FLAG_MASTER_KEY)))
+        }
+        Some(_) => {
+            let pwd = match gui::password_new(
+                "Aegis — One-off password",
+                "Choose a password to protect this (you'll need to share it):",
+            )? {
+                Some(p) => p,
+                None => return Ok(None),
+            };
+            Ok(Some((pwd, 0)))
+        }
+        None => Ok(None),
+    }
+}
+
+/// Resolve the password source and optional keyfile/photo for encryption.
+/// `ask` = one-off password (share); `photo` = add a photo as a second factor.
+/// A CLI `--keyfile` path always wins and skips the photo pick. Returns
+/// (password, master_flag, keyfile_path), or None if the user cancelled.
+fn resolve_password_and_keyfile(
     gui_mode: bool,
     ask: bool,
+    photo: bool,
     keyfile_cli: Option<PathBuf>,
     kind: &str,
-    input_display: &str,
-) -> Result<(bool, Option<PathBuf>), String> {
-    if !gui_mode {
-        return Ok((ask, keyfile_cli));
-    }
+    input: &Path,
+) -> Result<Option<(String, u8, Option<PathBuf>)>, String> {
+    let mut keyfile_path = keyfile_cli;
+    let mut want_photo = photo && keyfile_path.is_none();
 
-    let master_set = keychain::is_set().unwrap_or(false);
-
-    // First-time setup from the GUI: if no master exists yet (and the user
-    // didn't force --ask), offer to create one right here, so the master mode
-    // is usable from Finder/Dolphin without dropping to the terminal.
-    if !ask && !master_set {
-        let body = format!(
-            "No master password is set yet.\nHow do you want to encrypt this {kind}?\n{input_display}"
-        );
-        let items: &[(&str, &str, bool)] = &[
-            (
-                "set",
-                "Set a master password now (saved in your keyring)",
-                true,
-            ),
-            (
-                "custom",
-                "Use a one-off custom password (for sharing)",
-                false,
-            ),
-        ];
-        match gui::choose_radio("Aegis — First-time setup", &body, items)? {
-            Some(s) if s == "set" => {
-                let pwd = match gui::password_new(
-                    "Aegis — Set master password",
-                    "Choose a master password.\nIt is saved in your system keyring and used by default for encryption.",
-                )? {
-                    Some(p) => p,
-                    None => return Err("cancelled by user".into()),
-                };
-                keychain::set_master(&pwd).map_err(|e| e.to_string())?;
-                // Master now stored → use it (CLI --keyfile still honored).
-                return Ok((false, keyfile_cli));
-            }
-            Some(_) => return Ok((true, keyfile_cli)),
-            None => return Err("cancelled by user".into()),
-        }
-    }
-
-    let pwd_decided = ask || !master_set; // !master_set forces custom anyway
-    let keyfile_decided = keyfile_cli.is_some();
-
-    // Fast path: both already decided.
-    if pwd_decided && keyfile_decided {
-        return Ok((true, keyfile_cli));
-    }
-
-    if pwd_decided {
-        // Only ask about keyfile.
-        let body = format!(
-            "Should this {kind} also require a keyfile (extra factor)?\n{input_display}"
-        );
-        if gui::confirm("Aegis — Keyfile?", &body)? {
-            match gui::pick_file("Aegis — Pick keyfile", keyfile_start_dir().as_str())? {
-                Some(p) => Ok((true, Some(p))),
-                None => Err("cancelled by user (keyfile not chosen)".into()),
+    let (password, master_flag) = if ask {
+        // Share: a one-off password.
+        if gui_mode {
+            let body = format!(
+                "Protecting to share:\n{}\n\nChoose a password to give the recipient:",
+                input.display()
+            );
+            match gui::password_with_photo_option("Aegis — Protect to share", &body)? {
+                Some((pwd, wants_photo)) => {
+                    if keyfile_path.is_none() {
+                        want_photo = want_photo || wants_photo;
+                    }
+                    (pwd, 0u8)
+                }
+                None => return Ok(None),
             }
         } else {
-            Ok((true, keyfile_cli))
-        }
-    } else if keyfile_decided {
-        // Only ask master vs custom.
-        let body = format!("How do you want to encrypt this {kind}?\n{input_display}");
-        let items: &[(&str, &str, bool)] = &[
-            (
-                "master",
-                "Your master password (from the keyring)",
-                true,
-            ),
-            (
-                "custom",
-                "A custom password (one-off, for sharing)",
-                false,
-            ),
-        ];
-        match gui::choose_radio("Aegis — Encrypt", &body, items)? {
-            Some(s) if s == "custom" => Ok((true, keyfile_cli)),
-            Some(_) => Ok((false, keyfile_cli)),
-            None => Err("cancelled by user".into()),
+            eprintln!("Encrypting {kind}: {} (custom password)", input.display());
+            (ask_password_cli_with_confirm()?, 0u8)
         }
     } else {
-        // Full 4-option menu.
-        let body = format!("How do you want to encrypt this {kind}?\n{input_display}");
-        let items: &[(&str, &str, bool)] = &[
-            (
-                "master",
-                "Your master password (from the keyring)",
-                true,
-            ),
-            (
-                "master_kf",
-                "Master password + a keyfile (extra factor)",
-                false,
-            ),
-            (
-                "custom",
-                "A custom password (one-off, for sharing)",
-                false,
-            ),
-            (
-                "custom_kf",
-                "Custom password + a keyfile (extra factor)",
-                false,
-            ),
-        ];
-        let choice = match gui::choose_radio("Aegis — Encrypt", &body, items)? {
-            Some(s) => s,
-            None => return Err("cancelled by user".into()),
-        };
-        let needs_keyfile = choice.ends_with("_kf");
-        let use_ask = choice.starts_with("custom");
-        let kf = if needs_keyfile {
-            match gui::pick_file("Aegis — Pick keyfile", keyfile_start_dir().as_str())? {
-                Some(p) => Some(p),
-                None => return Err("cancelled by user (keyfile not chosen)".into()),
+        // Master-based ("for me", optionally + photo).
+        match keychain::get_master() {
+            Ok(Some(m)) => {
+                if !gui_mode {
+                    eprintln!("Encrypting {kind}: {} (master)", input.display());
+                }
+                (m, FLAG_MASTER_KEY)
             }
+            Ok(None) => {
+                if gui_mode {
+                    match gui_first_time_master(kind, &input.display().to_string())? {
+                        Some(pair) => pair,
+                        None => return Ok(None),
+                    }
+                } else {
+                    return Err(
+                        "no master password set; run `aegis init`, or pass --ask".to_string(),
+                    );
+                }
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if gui_mode {
+                    gui::show_error(&msg);
+                }
+                return Err(msg);
+            }
+        }
+    };
+
+    if want_photo {
+        if gui_mode {
+            keyfile_path = Some(pick_and_freeze_photo()?);
         } else {
-            None
-        };
-        Ok((use_ask, kf))
+            return Err("--photo needs the GUI; in a terminal use --keyfile <path>".to_string());
+        }
     }
+
+    Ok(Some((password, master_flag, keyfile_path)))
 }
 
 fn keyfile_start_dir() -> String {
@@ -693,6 +754,8 @@ fn cmd_encrypt(
     ask: bool,
     keep: bool,
     keyfile: Option<PathBuf>,
+    photo: bool,
+    menu: bool,
     compress: bool,
     gui_mode: bool,
 ) -> Result<(), String> {
@@ -716,53 +779,34 @@ fn cmd_encrypt(
 
     let kind = if is_dir { "directory" } else { "file" };
 
-    // Decide pwd source (master/custom) and whether to use a keyfile.
-    // CLI flags (--ask, --keyfile) win in any mode. GUI mode fills in
-    // anything not pre-decided via menus.
-    let (effective_ask, effective_keyfile) =
-        decide_encrypt_options(gui_mode, ask, keyfile, kind, &input.display().to_string())?;
-
-    // Decide password source.
-    let (password, master_flag) = if effective_ask {
-        let pwd = if gui_mode {
-            let title = "Aegis — Encrypt (custom password)";
-            let body = format!(
-                "Encrypting {kind}:\n{}\n\nChoose a password (NOT the master):",
-                input.display()
-            );
-            match gui::password_new(title, &body)? {
-                Some(p) => p,
-                None => return Err("cancelled by user".into()),
-            }
-        } else {
-            eprintln!("Encrypting {kind}: {} (custom password)", input.display());
-            ask_password_cli_with_confirm()?
-        };
-        (pwd, 0u8)
-    } else {
-        // Use master from keyring.
-        let master = match keychain::get_master() {
-            Ok(Some(p)) => p,
-            Ok(None) => {
-                let msg = "no master password set; run `aegis init`, or pass --ask".to_string();
-                if gui_mode {
-                    gui::show_error(&msg);
-                }
-                return Err(msg);
-            }
-            Err(e) => {
-                let msg = format!("{e}");
-                if gui_mode {
-                    gui::show_error(&msg);
-                }
-                return Err(msg);
-            }
-        };
-        if !gui_mode {
-            eprintln!("Encrypting {kind}: {} (master)", input.display());
+    // --menu (GUI): let the user pick the intent up front, which just sets the
+    // ask/photo flags the rest of the flow already understands.
+    let (mut ask, mut photo) = (ask, photo);
+    if menu && gui_mode {
+        let body = format!(
+            "How do you want to protect this {kind}?\n{}",
+            input.display()
+        );
+        let items: &[(&str, &str, bool)] = &[
+            ("me", "For me (saved password)", true),
+            ("photo", "For me + a photo (second key)", false),
+            ("share", "To share (one-off password)", false),
+        ];
+        match gui::choose_radio("Aegis — Protect", &body, items)? {
+            Some(s) if s == "photo" => photo = true,
+            Some(s) if s == "share" => ask = true,
+            Some(_) => {}
+            None => return Ok(()),
         }
-        (master, FLAG_MASTER_KEY)
-    };
+    }
+
+    // Decide password source (master vs one-off) and resolve the optional
+    // photo/keyfile second factor.
+    let (password, master_flag, effective_keyfile) =
+        match resolve_password_and_keyfile(gui_mode, ask, photo, keyfile, kind, &input)? {
+            Some(t) => t,
+            None => return Ok(()), // user cancelled
+        };
 
     // Read keyfile digest if a keyfile was selected.
     let keyfile_digest = match effective_keyfile.as_ref() {
@@ -908,9 +952,9 @@ fn cmd_decrypt(
             Some(p)
         } else if gui_mode {
             gui::show_info(
-                "This file was encrypted with a keyfile.\nPlease select the keyfile to use for decryption.",
+                "This file is protected with a photo / key file.\nChoose the photo or key file to open it.",
             );
-            match gui::pick_file("Aegis — Pick keyfile", keyfile_start_dir().as_str())? {
+            match gui::pick_file("Aegis — Choose the photo / key", key_picker_start_dir().as_str())? {
                 Some(p) => Some(p),
                 None => return Err("cancelled by user (keyfile not chosen)".into()),
             }
@@ -1224,8 +1268,10 @@ fn main() -> ExitCode {
             ask,
             keep,
             keyfile,
+            photo,
+            menu,
             compress,
-        } => cmd_encrypt(input, output, ask, keep, keyfile, compress, gui_mode),
+        } => cmd_encrypt(input, output, ask, keep, keyfile, photo, menu, compress, gui_mode),
         Cmd::Decrypt {
             input,
             output,
@@ -1281,6 +1327,36 @@ mod tests {
             insert_counter(Path::new("archive.tar.gz"), 1),
             PathBuf::from("archive.tar (1).gz")
         );
+    }
+
+    #[test]
+    fn freeze_photo_dedups_and_disambiguates() {
+        let base = std::env::temp_dir().join(format!("aegis-freeze-{}", std::process::id()));
+        let keys = base.join("keys");
+        let src_dir = base.join("src");
+        std::fs::create_dir_all(&src_dir).unwrap();
+
+        let photo = src_dir.join("cat.jpg");
+        std::fs::write(&photo, b"image-bytes-v1").unwrap();
+
+        // First freeze lands as cat.jpg.
+        let f1 = freeze_photo_into(&keys, &photo).unwrap();
+        assert_eq!(f1, keys.join("cat.jpg"));
+        assert_eq!(std::fs::read(&f1).unwrap(), b"image-bytes-v1");
+
+        // Freezing the identical file again reuses the same frozen copy.
+        let f2 = freeze_photo_into(&keys, &photo).unwrap();
+        assert_eq!(f2, f1);
+
+        // A different file with the same name gets a (1) suffix.
+        let other_dir = src_dir.join("dup");
+        std::fs::create_dir_all(&other_dir).unwrap();
+        let other = other_dir.join("cat.jpg");
+        std::fs::write(&other, b"image-bytes-DIFFERENT").unwrap();
+        let f3 = freeze_photo_into(&keys, &other).unwrap();
+        assert_eq!(f3, keys.join("cat (1).jpg"));
+
+        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]

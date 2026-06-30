@@ -12,7 +12,7 @@
 			<key>NSMenuItem</key>
 			<dict>
 				<key>default</key>
-				<string>Aegis - Open</string>
+				<string>Aegis - Protect with photo</string>
 			</dict>
 			<key>NSMessage</key>
 			<string>runWorkflowAsService</string>

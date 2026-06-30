@@ -82,6 +82,21 @@ pub fn password_ask(title: &str, body: &str) -> Result<Option<String>, String> {
     }
 }
 
+/// Ask for a one-off password and then whether to add a photo second factor.
+/// kdialog/zenity can't combine a password field with a checkbox, so it's two
+/// dialogs. Returns (password, wants_photo), or None if cancelled.
+pub fn password_with_photo_option(
+    title: &str,
+    body: &str,
+) -> Result<Option<(String, bool)>, String> {
+    let pwd = match password_ask(title, body)? {
+        Some(p) => p,
+        None => return Ok(None),
+    };
+    let wants_photo = confirm(title, "Add a photo as a second key?")?;
+    Ok(Some((pwd, wants_photo)))
+}
+
 pub fn show_error(text: &str) {
     if let Ok(backend) = detect_backend() {
         let _ = match backend {

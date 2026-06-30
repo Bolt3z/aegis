@@ -4,19 +4,32 @@ Name=Aegis
 ServiceTypes=KonqPopupMenu/Plugin
 MimeType=all/all;inode/directory;
 X-KDE-Submenu=Aegis
+X-KDE-Submenu[it]=Aegis
 X-KDE-Priority=TopLevel
 Icon=document-encrypt
-Actions=Encrypt;Decrypt;Info;
+Actions=Protect;ProtectPhoto;ProtectShare;Open;Info;
 
-[Desktop Action Encrypt]
-Name=Encrypt with Aegis
-Name[it]=Cifra con Aegis
+[Desktop Action Protect]
+Name=Protect (for me)
+Name[it]=Proteggi (per me)
 Icon=document-encrypt
 Exec=aegis --gui encrypt %f
 
-[Desktop Action Decrypt]
-Name=Decrypt with Aegis
-Name[it]=Decifra con Aegis
+[Desktop Action ProtectPhoto]
+Name=Protect with a photo
+Name[it]=Proteggi con una foto
+Icon=document-encrypt
+Exec=aegis --gui encrypt --photo %f
+
+[Desktop Action ProtectShare]
+Name=Protect to share
+Name[it]=Proteggi per inviare
+Icon=document-encrypt
+Exec=aegis --gui encrypt --ask %f
+
+[Desktop Action Open]
+Name=Open (decrypt)
+Name[it]=Apri (decifra)
 Icon=document-decrypt
 Exec=aegis --gui decrypt %f
 

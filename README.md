@@ -67,13 +67,20 @@ wizard.
 The `.pkg` installs:
 
 - `/usr/local/bin/aegis` (already in `$PATH` on macOS)
-- Three Finder **Quick Actions** in `/Library/Services/`:
-  - `Aegis - Encrypt`
-  - `Aegis - Decrypt`
-  - `Aegis - Info`
+- Finder **Quick Actions** in `/Library/Services/`:
+  - `Aegis - Protect` — encrypt with your saved password (one click)
+  - `Aegis - Protect with photo` — your password **+** a photo as a second key
+  - `Aegis - Protect to share` — a one-off password to give the recipient
+  - `Aegis - Protect (menu)` — a single entry that asks which of the above
+  - `Aegis - Open` — decrypt (auto-detects what the file needs)
+  - `Aegis - Info` — show the header without decrypting
 
 Right-click any file or folder in Finder → **Quick Actions** (or
 **Services** on older macOS) → pick an action.
+
+> Two styles ship side by side so you can pick what you like: the separate
+> `Protect…` entries (one click each) and the single `Protect (menu)` entry
+> (one entry, then a small menu). Keep whichever you prefer.
 
 > **First-run Gatekeeper warning.** The `.pkg` is not code-signed (no Apple
 > Developer ID), so macOS shows "this package can't be verified" on the
@@ -252,16 +259,20 @@ script-friendly).
 
 The `.deb` ships a service menu at
 `/usr/share/kio/servicemenus/aegis.desktop`. Right-click any file or folder
-in Dolphin and the **Aegis** submenu offers **Encrypt**, **Decrypt**, and
-**Show header info**. The actions run with `--gui` so password prompts use
-kdialog and successes/errors show as message boxes.
+in Dolphin and the **Aegis** submenu offers, by intent:
 
-When you trigger **Encrypt** from the menu, a small dialog asks whether to
-use your master password (default) or a custom one-off password — same
-choice as `--ask` from the CLI. If you're encrypting something to send to
-someone else, pick the custom option: the resulting `.bml` won't try to
-reach into the recipient's keyring, it'll just ask them for the password
-you communicate out-of-band.
+- **Protect (for me)** — encrypt with your saved master password, no questions.
+- **Protect with a photo** — master password **+** a photo as a second key (you
+  pick a photo and Aegis freezes a copy of it).
+- **Protect to share** — a one-off password to communicate to the recipient;
+  the resulting `.bml` won't reach into anyone's keyring, it just asks for that
+  password. You can also tick "add a photo" in that flow.
+- **Open (decrypt)** — decrypt, auto-detecting whether the file needs your
+  master, a typed password, or a photo/key.
+- **Show header info** — inspect without decrypting.
+
+The actions run with `--gui` so prompts use kdialog and successes/errors show
+as message boxes.
 
 When you **Decrypt** a `.bml` that someone else encrypted with their
 master password, the prompt explicitly tells you so — "Enter the sender's
@@ -379,9 +390,12 @@ The `--locked` and major-version pin are workarounds for Rust 1.85 (newer
   rename from "BitlokerMeglio" and were kept for simplicity — there is no
   schema migration concern because no files were in the wild during the
   rename.
-- No keyfile mode yet (just passwords).
 - No secure-shred of the original plaintext after encryption.
-- No Dolphin right-click integration yet.
+- Quick Actions / Dolphin menu are single-file at a time (multi-select is on
+  the roadmap).
+- A photo used as a second key must stay byte-identical; Aegis freezes a copy
+  in `~/.config/aegis/keys/`, but back that copy up — losing it (or the keyfile)
+  means losing access even with the right password.
 
 ## License
 
