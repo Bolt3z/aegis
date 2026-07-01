@@ -32,6 +32,10 @@ pub fn is_available() -> bool {
     detect_backend().is_ok()
 }
 
+/// Width (px) for password dialogs, wide enough that a long password's
+/// masked dots stay fully visible instead of scrolling out of view.
+const PASSWORD_DIALOG_WIDTH: u32 = 480;
+
 fn capture_stdout(out: std::process::Output) -> Option<String> {
     if !out.status.success() {
         return None;
@@ -48,6 +52,8 @@ pub fn password_new(title: &str, body: &str) -> Result<Option<String>, String> {
         Backend::Kdialog => {
             let out = Command::new("kdialog")
                 .args(["--title", title, "--newpassword", body])
+                .arg("--geometry")
+                .arg(format!("{PASSWORD_DIALOG_WIDTH}x200"))
                 .output()
                 .map_err(|e| e.to_string())?;
             Ok(capture_stdout(out))
@@ -74,6 +80,8 @@ pub fn password_ask(title: &str, body: &str) -> Result<Option<String>, String> {
         Backend::Kdialog => {
             let out = Command::new("kdialog")
                 .args(["--title", title, "--password", body])
+                .arg("--geometry")
+                .arg(format!("{PASSWORD_DIALOG_WIDTH}x120"))
                 .output()
                 .map_err(|e| e.to_string())?;
             Ok(capture_stdout(out))
@@ -112,6 +120,8 @@ pub fn password_with_photo_option(
                 "--combo-values",
                 "No|Yes",
             ])
+            .arg("--width")
+            .arg(PASSWORD_DIALOG_WIDTH.to_string())
             .output()
             .map_err(|e| e.to_string())?;
         if !out.status.success() {
@@ -307,6 +317,8 @@ pub fn show_info(text: &str) {
 fn zenity_password(title: &str) -> Result<Option<String>, String> {
     let out = Command::new("zenity")
         .args(["--password", "--title", title])
+        .arg("--width")
+        .arg(PASSWORD_DIALOG_WIDTH.to_string())
         .output()
         .map_err(|e| e.to_string())?;
     Ok(capture_stdout(out))
