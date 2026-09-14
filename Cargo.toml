@@ -66,4 +66,5 @@ assets = [
     ["target/completions/_aegis", "usr/share/zsh/vendor-completions/_aegis", "644"],
     ["target/completions/aegis.fish", "usr/share/fish/vendor_completions.d/aegis.fish", "644"],
     ["packaging/aegis.desktop", "usr/share/kio/servicemenus/aegis.desktop", "644"],
+    ["packaging/nautilus/aegis.py", "usr/share/nautilus-python/extensions/aegis.py", "644"],
 ]
