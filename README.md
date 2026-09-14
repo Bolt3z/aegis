@@ -288,6 +288,20 @@ Notes:
 - After installing the `.deb` you may need to restart Dolphin (or run
   `kbuildsycoca6` / log out and back in) for the menu to appear.
 
+### Nautilus (GNOME Files / Ubuntu) right-click
+
+The `.deb` also ships a nautilus-python extension at
+`/usr/share/nautilus-python/extensions/aegis.py`, giving the same **Aegis**
+submenu (same five actions, same `aegis` CLI flags) in Nautilus. Requires
+`python3-nautilus` on the target machine — it's not installed by default:
+
+```
+sudo apt install python3-nautilus
+```
+
+Restart Nautilus for the menu to appear: `nautilus -q` (it respawns on the
+next folder you open).
+
 ## Security model
 
 What Aegis protects:

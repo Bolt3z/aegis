@@ -2,3 +2,5 @@
 
 # assistant scratch
 .claude/
+__pycache__/
+*.pyc
